@@ -1,0 +1,159 @@
+# ----- PATHS -----
+paths:
+  data_root: ./data
+  index_root: ./store
+
+# ----- INDEX -----
+index:
+  name: sgdk   # logical name for this index; used as filename prefix
+
+# ----- SOURCES -----
+# ----- SOURCES (generic) -----
+# Define the local inputs for your RAG. Each entry describes a directory
+# with include/exclude globs and how to treat its content.
+sources:
+  - name: CodeRepo
+    type: repo                # label stored in metadata (e.g., repo/docs/wiki/external)
+    path: ./data/repo         # point to your local repository checkout
+    include: ["**/*"]
+    exclude: ["**/*.png","**/*.jpg","**/*.pdf","**/*.zip","**/*.7z"]
+    treat_as: auto            # one of: auto | code | prose
+  - name: Tutorials
+    type: tutorials
+    path: ./data/tutorials_txt
+    include: ["**/*.md","**/*.html","**/*.txt"]
+    treat_as: prose
+  - name: Docs
+    type: docs
+    path: ./data/docs_txt
+    include: ["**/*.txt"]
+    treat_as: prose
+  - name: ExternalDocs
+    type: docs
+    path: ./data/documents_txt
+    include: ["**/*.txt"]
+    treat_as: prose
+
+# Alternatively, define a generic sources list (recommended):
+# sources:
+#   - name: SGDK
+#     type: repo
+#     path: ./data/sgdk
+#     include: ["**/*"]
+#     exclude: []
+#     treat_as: auto   # one of: auto | code | prose
+#   - name: Wiki
+#     type: wiki
+#     path: ./data/wiki_txt
+#     include: ["**/*.html", "**/*.md"]
+#     treat_as: prose
+
+# ----- INDEXING -----
+indexing:
+  code_max_lines: 100              # slightly smaller windows
+  prose_max_chars: 1600
+  min_chunk_chars: 300
+  overlap_lines: 10
+
+# Hard token cap per chunk (used by build_index.py)
+max_tokens_per_chunk: 700
+# Tokenizer used for counting + trimming in both index & prompt steps
+tokenizer_model_id: "stabilityai/stable-code-instruct-3b"
+model_id: "stabilityai/stable-code-instruct-3b"
+
+# ----- EMBEDDING / RERANK -----
+embedding:
+  model: "BAAI/bge-base-en-v1.5"
+  batch_size: 64
+  normalize_embeddings: true
+
+reranker:
+  enabled: true
+  model: "BAAI/bge-reranker-base"
+  top_k: 10
+  final_k: 3                       # keep it small; prompt builder still trims
+
+# ----- RETRIEVAL -----
+retrieval:
+  initial_k: 24
+  include_metadata: [repo, path, start_line, end_line, url, source_type]
+  # Optional per-source weighting and symbol prefixes for identifier boost
+  # source_weights: { repo: 1.0, wiki: 1.0, tutorial: 0.95, external: 0.95 }
+  # symbol_prefixes: []
+  bm25:
+    enabled: true          # enable lexical BM25 fusion (requires rank_bm25)
+  fusion_weights:
+    semantic: 0.55
+    lexical: 0.35
+    identifier: 0.10
+
+# ----- PROMPT / GENERATION -----
+prompt:
+  # strict input-token budget for the *prompt sent to the model*
+  max_input_tokens: 3800
+  context_separator: "\n---\n"
+  system_message: |
+    You are a concise domain expert. Prefer minimal, executable examples when code is requested.
+    Ground every statement in the provided CONTEXT only.
+    If something is uncertain or missing in CONTEXT, say so and suggest what to check.
+  template: |
+    SYSTEM:
+    {system_message}
+
+    QUESTION:
+    {question}
+
+    CONTEXT (CITED EXCERPTS):
+    {context}
+
+    INSTRUCTIONS:
+    - Use only the information in CONTEXT.
+    - Cite sources inline like [type:label:start-end] or [type:label].
+    - Provide a minimal compilable snippet when code is requested.
+    - If anything may be outdated (external), warn once: "(external, may be outdated)".
+
+    ANSWER:
+
+generation:
+  # default model for rag/chat.py (you can still override with --model_id)
+  model_id: "stabilityai/stable-code-instruct-3b"
+
+# Optional: symbol extraction configuration (used by rag/build_symbols.py)
+symbols:
+  base_dirs: []
+  header_globs: ["**/*.h", "**/*.hpp"]
+
+# Optional: fetching tasks for ingest/fetch_sources.py
+# fetch:
+#   - type: github
+#     repo: https://github.com/org/repo
+#     dest: ./data/repo
+#     depth: 1
+#   - type: http_list
+#     urls:
+#       - https://example.com/page1
+#       - https://example.com/page2
+#     dest_dir: ./data/tutorials
+
+# Optional: crawl tasks (run via ingest/crawl_web.py)
+# crawl:
+#   - seeds: ["https://example.com/docs", "https://another.site/page"]
+#     allow_domains: ["example.com", "another.site"]
+#     depth: 2
+#     per_domain_limit: 200
+#     out_dir: ./data/crawl
+
+# Optional: document conversion tasks (run via ingest/convert_docs_to_text.py --from-config)
+convert_docs:
+  - src: ./data/docs
+    dst: ./data/docs_txt
+    glob: ["**/*.pdf","**/*.doc","**/*.docx","**/*.ppt","**/*.pptx","**/*.xls","**/*.xlsx","**/*.odt","**/*.ods","**/*.odp","**/*.rtf","**/*.png","**/*.jpg","**/*.jpeg","**/*.gif","**/*.bmp","**/*.tiff"]
+    enable_ocr: true
+    use_tesseract: true
+    ocr_image_conf_threshold: 0.6
+  - src: ../../documents
+    dst: ./data/documents_txt
+    glob: ["**/*.pdf","**/*.doc","**/*.docx","**/*.ppt","**/*.pptx","**/*.xls","**/*.xlsx","**/*.odt","**/*.ods","**/*.odp","**/*.rtf","**/*.png","**/*.jpg","**/*.jpeg","**/*.gif","**/*.bmp","**/*.tiff"]
+    enable_ocr: true
+    use_tesseract: true
+    ocr_image_conf_threshold: 0.6

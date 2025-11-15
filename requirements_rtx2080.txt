@@ -1,0 +1,61 @@
+# Requirements lock for Windows + RTX 2080 (CUDA 11.8) + Python 3.11
+#
+# Usage (Git Bash / PowerShell inside a clean venv, Python 3.11):
+#   python -m pip install --upgrade pip
+#   python -m pip install -r requirements_rtx2080.txt
+#
+# Notes:
+# - We point pip to the PyTorch CUDA 11.8 wheels and also to PyPI.
+# - If torchaudio fails to install on your combo, you can remove that line;
+#   torchaudio is not required by this project.
+
+--index-url https://download.pytorch.org/whl/cu118
+--extra-index-url https://pypi.org/simple
+
+# CUDA-enabled PyTorch stack (CUDA 11.8)
+# Matches: `pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118`
+torch
+torchvision
+torchaudio
+
+# Core dependencies (pin to stable versions known to work on Win + Py 3.11)
+# FAISS: pin to a Windows/Python-compatible release (1.12.0 available)
+faiss-cpu==1.12.0
+pandas==2.2.3
+pyarrow
+pyyaml==6.0.1
+tqdm==4.66.4
+beautifulsoup4==4.12.3
+markdownify==0.13.1
+lxml
+unstructured[local-inference,ocr]>=0.16.19
+pytesseract>=0.3.10
+pillow>=10.0.0
+pdf2image>=1.17.0
+opencv-python>=4.9.0
+PyMuPDF>=1.24.0
+python-magic-bin==0.4.14
+mammoth>=1.7.0
+python-pptx>=0.6.23
+openpyxl>=3.1.2
+xlrd>=2.0.1
+tabulate>=0.9.0
+opencv-python-headless>=4.9.0
+safetensors==0.6.2
+requests==2.32.3
+
+# Retrieval models
+sentence-transformers
+transformers
+accelerate
+tokenizers
+
+# Lexical retrieval (BM25)
+rank_bm25==0.2.2
+
+# Optional (commented): bitsandbytes is not supported on Windows
+# bitsandbytes==0.43.1
+
+# Optional: OpenAI-compatible generation
+openai
+tiktoken>=0.7.0

@@ -1,0 +1,53 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments / local tooling caches
+.venv/
+.venv*/
+.pip-cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Generated artifacts and local data
+store/
+data/
+sessions/
+saved_contexts/
+
+# Model/index artifacts (in case they land outside store/)
+*.faiss
+*.parquet
+*.npy
+
+# Logs and temporary outputs
+*.log
+*.tmp
+*.bak
+
+# SGDK-specific guides/config/launchers (keep repo generic)
+config.sgdk.yaml
+README_sgdk.md
+launch_sgdk.sh
+
+# Allow core configs and scripts
+!config.yaml
+!config.test.yaml
+!requirements.txt
+!requirements_rtx2080.txt
+!launch.sh
+!launch_test.sh
+!README.md
+!SETUP.md
+!ingest/**
+!rag/**
+!tools/**

@@ -1,0 +1,80 @@
+# Test configuration for fast local runs
+
+paths:
+  data_root: ./data
+  index_root: ./store
+
+index:
+  name: test
+
+sources:
+  - name: CodeRepo
+    type: repo
+    path: ./data/repo
+    include: ["**/*"]
+    exclude: ["**/*.png","**/*.jpg","**/*.pdf","**/*.zip","**/*.7z"]
+    treat_as: auto
+  - name: Docs
+    type: docs
+    path: ./data/docs_txt
+    include: ["**/*.txt"]
+    treat_as: prose
+  - name: ExternalDocs
+    type: docs
+    path: ./data/documents_txt
+    include: ["**/*.txt"]
+    treat_as: prose
+
+indexing:
+  code_max_lines: 80
+  prose_max_chars: 1200
+  min_chunk_chars: 200
+  overlap_lines: 8
+
+# Smaller, fast embedder for tests
+embedding:
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  batch_size: 32
+  normalize_embeddings: true
+
+reranker:
+  enabled: true
+  model: "BAAI/bge-reranker-base"
+  top_k: 8
+  final_k: 3
+
+retrieval:
+  initial_k: 16
+  include_metadata: [repo, path, start_line, end_line, url, source_type]
+
+prompt:
+  max_input_tokens: 3200
+  context_separator: "\n---\n"
+  system_message: |
+    You are a concise domain expert. Use only the provided CONTEXT.
+  template: |
+    SYSTEM:
+    {system_message}
+
+    QUESTION:
+    {question}
+
+    CONTEXT (CITED EXCERPTS):
+    {context}
+
+    ANSWER:
+
+generation:
+  model_id: "stabilityai/stable-code-instruct-3b"
+
+symbols:
+  base_dirs: []
+  header_globs: ["**/*.h", "**/*.hpp"]
+
+convert_docs:
+  - src: ./data/docs
+    dst: ./data/docs_txt
+    glob: ["**/*.pdf","**/*.doc","**/*.docx","**/*.ppt","**/*.pptx","**/*.xls","**/*.xlsx","**/*.odt","**/*.ods","**/*.odp","**/*.rtf","**/*.png","**/*.jpg","**/*.jpeg","**/*.gif","**/*.bmp","**/*.tiff"]
+    enable_ocr: true
+    use_tesseract: true
+    ocr_image_conf_threshold: 0.6
