@@ -5,7 +5,7 @@ paths:
 
 # ----- INDEX -----
 index:
-  name: sgdk   # logical name for this index; used as filename prefix
+  name: rag   # logical name for this index; used as filename prefix
 
 # ----- SOURCES -----
 # ----- SOURCES (generic) -----
@@ -36,9 +36,9 @@ sources:
 
 # Alternatively, define a generic sources list (recommended):
 # sources:
-#   - name: SGDK
+#   - name: Repo
 #     type: repo
-#     path: ./data/sgdk
+#     path: ./data/repo_txt
 #     include: ["**/*"]
 #     exclude: []
 #     treat_as: auto   # one of: auto | code | prose

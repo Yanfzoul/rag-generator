@@ -2,7 +2,6 @@
 
 Quick links
 - SETUP (Linux/macOS/Git Bash/GitLab): SETUP.md
-- SGDK web‑first guide: README_sgdk.md
 
 This project is a flexible Retrieval‑Augmented Generation (RAG) stack you can point at any sources (repos, websites, PDFs/Office docs, local folders) and use immediately. No code edits are needed: everything is driven by `config.yaml`.
 
@@ -13,6 +12,7 @@ Core features
 - Attachments at question time: add files/directories without rebuilding the index
 - Website crawler + HTML to text + Office/PDF to text conversion
 - GPU-optional: CPU by default; add `--gpu` to accelerate on CUDA; Tensor-Core friendly
+- MPS-optional: CPU by default; add `--mps` to accelerate on Mac Silicon
 
 ## Embedding model cheat sheet
 
@@ -220,11 +220,10 @@ Artifacts
 
 - Normal config: `./launch.sh [--gpu|--mps]` (uses `config.yaml`)
 - Test config: `./launch_test.sh [--gpu|--mps]` (uses `config.test.yaml` and seeds a tiny corpus)
-- SGDK full pipeline: `./launch_sgdk.sh [--gpu|--mps]` (uses `config.sgdk.yaml` and runs fetch/crawl/normalize/convert via config)
 
 Generated artifacts (safe to delete for a fresh run)
 - `store/` – FAISS index + parquet + numpy + manifest (per `index.name`).
-- `data/` – downloaded/cloned/crawled sources (`./data/sgdk`, `./data/wiki`, `./data/wiki_txt`, ...).
+- `data/` – downloaded/cloned/crawled sources (`./data/repo`, `./data/wiki`, `./data/wiki_txt`, ...).
 - `sessions/` – chat session logs (`sessions/<id>.jsonl`).
 - `saved_contexts/` – saved prompts/context snapshots.
 - Temporary reports/logs (e.g., `convert_report.jsonl` under `data/...`).
@@ -234,7 +233,7 @@ To reset everything, simply delete these directories:
 ```bash
 rm -rf store data sessions saved_contexts
 ```
-Then re-run the fetch/crawl/normalize/convert + index steps to rebuild from scratch (e.g., `./launch_sgdk.sh`).
+Then re-run the fetch/crawl/normalize/convert + index steps to rebuild from scratch (e.g., `./launch.sh`).
 
 ---
 
