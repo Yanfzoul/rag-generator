@@ -1,4 +1,4 @@
-# macOS requirements (Apple Silicon or Intel) with OCR + MPS-ready PyTorch
+﻿# macOS requirements (Apple Silicon or Intel) with OCR + MPS-ready PyTorch
 #
 # Usage (inside venv):
 #   python -m pip install --upgrade pip
@@ -31,6 +31,7 @@ requests==2.32.3
 rank_bm25==0.2.2
 
 # Embeddings + reranker (PyTorch wheels from PyPI include MPS support)
+sentencepiece>=0.1.99  # prebuilt wheels on macOS; avoids pkg-config build
 sentence-transformers
 torch>=2.2.0
 
