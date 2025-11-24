@@ -29,17 +29,28 @@ Provide a config-first retrieval-augmented generation toolkit that ingests repos
 - Hybrid retrieval and reranking (`docs/features/hybrid-retrieval.md`)
 - Attachment-augmented QA (`docs/features/attachment-augmented-qa.md`)
 - Accelerator-aware execution and generation bridge (`docs/features/acceleration-and-generation.md`)
+- Chunking strategy (per-source, meaning-preserving)
 
 ## Functional requirements
 1. Configuration: read YAML selected by `RAG_CONFIG`, covering paths, sources, chunking, embedding model, retrieval weights, prompt, and generation defaults.
 2. Source ingestion: support multiple local roots with include/exclude globs and `treat_as` hints; optional fetch/crawl/normalize/convert flows output normalized text directories consumed by the indexer.
-3. Index building: `ingest/build_index_hybrid_fast.py` emits FAISS index, parquet metadata, `embeddings.npy`, and `manifest.json`; honors chunk sizing from `indexing` and `max_tokens_per_chunk`; CPU default with optional `--gpu` or `--mps`.
+3. Index building: `ingest/build_index_hybrid_fast.py` emits FAISS index, parquet metadata, `embeddings.npy`, and `manifest.json`; honors chunk sizing (global defaults or per-source overrides) and `max_tokens_per_chunk`; CPU default with optional `--gpu` or `--mps`.
 4. Incremental runs: when `--incremental` is set, reuse unchanged embeddings using manifest diffing and prune deleted files before writing new artifacts.
 5. Retrieval: `rag/retrieve.py` loads FAISS/meta, fuses semantic scores with BM25 (if enabled) and identifier hits, optionally reranks with a CrossEncoder, and returns the top-k rows; printing is available with `--show`.
 6. Chat: `rag/chat.py` builds prompts from the configured template, trims to `max_input_tokens`, supports sessions/history, `--initial_k`/`--final_k`, `--use_reranker`, and attachments; `rag/chat_openai.py` keeps local retrieval while delegating generation to an OpenAI-compatible endpoint.
-7. Attachments: `--attach` paths are chunked and embedded on the fly with caps `--attach_limit_files` and `--attach_limit_chunks`; `--attach_only` bypasses the stored index.
+7. Attachments: `--attach` paths are chunked and embedded on the fly with caps `--attach_limit_files` and `--attach_limit_chunks`; `--attach_only` bypasses the stored index; attachment chunking mirrors per-source rules when the path falls under a known source, otherwise uses global defaults.
 8. Conversion tasks: `ingest/convert_docs_to_text.py --from-config` runs `convert_docs` entries (with OCR controls); `ingest/crawl_web.py --from-config` and `ingest/normalize_text.py --from-config` handle web-first pipelines.
 9. Observability: `tools/doctor.py` performs environment checks; indexing prints throughput/timing; retrieval/chat log device selection and reranker usage; artifacts live under `paths.index_root` and inputs under `paths.data_root`.
+
+## Chunking strategy (per-source, meaning-preserving)
+- Config: global defaults live under `indexing.*` and `max_tokens_per_chunk`. Each `sources:` entry may include `chunking` overrides: `code_max_lines`, `overlap_lines`, `prose_max_chars`, `min_chunk_chars`, and optional `tokenizer_cap` to replace the global token cap. When absent, fall back to defaults.
+- Routing: `treat_as: code` uses code strategy; `treat_as: prose` uses prose strategy; `treat_as: auto` keeps the current heuristic (extensions + path hints) to choose code vs prose.
+- Code strategy: windowed by `code_max_lines` with `overlap_lines` (defaults 100/10); prefer breaks on blank lines; skip chunks under 5 chars; IDs keep line ranges.
+- Prose strategy: sentence-aware splitting when available (NLTK/SpaCy); pack sentences up to `prose_max_chars`, emitting when `min_chunk_chars` is reached or at EOF; fallback to simple char windows if sentence splitting fails.
+- Token cap: after chunking, enforce `max_tokens_per_chunk` or `tokenizer_cap`; trim and log when clipping occurs to keep chunks within model limits.
+- Deduplication: per-file pass drops identical chunk texts (whitespace-normalized) to reduce overlap-induced redundancy.
+- Metadata: continue emitting `source_type`, `repo`, `path`, `start_line`, `end_line`, `url`; capture optional section headers/titles for prose when detectable to aid reranking and prompting.
+- Observability: report per-source chunk counts and average sizes; warn when trimmed chunks exceed a threshold; surface attachment chunk counts when attachments are processed.
 
 ## Non-functional requirements
 - Operates on CPU-only environments; GPU/MPS paths fail fast and fall back when unavailable.

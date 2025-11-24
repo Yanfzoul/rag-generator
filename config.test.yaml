@@ -14,16 +14,28 @@ sources:
     include: ["**/*"]
     exclude: ["**/*.png","**/*.jpg","**/*.pdf","**/*.zip","**/*.7z"]
     treat_as: auto
+    chunking:
+      code_max_lines: 80
+      overlap_lines: 8
+      tokenizer_cap: 650
   - name: Docs
     type: docs
     path: ./data/docs_txt
     include: ["**/*.txt"]
     treat_as: prose
+    chunking:
+      prose_max_chars: 1200
+      min_chunk_chars: 200
+      tokenizer_cap: 650
   - name: ExternalDocs
     type: docs
     path: ./data/documents_txt
     include: ["**/*.txt"]
     treat_as: prose
+    chunking:
+      prose_max_chars: 1200
+      min_chunk_chars: 200
+      tokenizer_cap: 650
 
 indexing:
   code_max_lines: 80

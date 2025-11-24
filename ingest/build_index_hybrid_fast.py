@@ -14,6 +14,7 @@ Hybrid-Fast (CPU+GPU) index builder — with INCREMENTAL mode
 """
 
 import os, re, yaml, argparse, hashlib, threading, queue, time, json
+from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Set
 
@@ -24,6 +25,7 @@ from tqdm import tqdm
 import faiss
 import torch
 from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer
 
 # Quieter HF / tokenizers; reduce PyTorch thread contention on Windows
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -95,6 +97,13 @@ CODE_MAX_LINES   = int(CFG["indexing"]["code_max_lines"])
 PROSE_MAX_CHARS  = int(CFG["indexing"]["prose_max_chars"])
 MIN_CHUNK_CHARS  = int(CFG["indexing"]["min_chunk_chars"])
 OVERLAP_LINES    = int(CFG["indexing"]["overlap_lines"])
+MAX_TOKENS_PER_CHUNK = int((CFG.get("max_tokens_per_chunk") or 0) or 0)
+TOKENIZER_MODEL_ID = CFG.get("tokenizer_model_id") or CFG.get("model_id") or EMB_MODEL
+TOKENIZER = None
+TOKENIZER_LOCK = threading.Lock()
+STATS_LOCK = threading.Lock()
+
+CHUNK_STATS: Counter = Counter()
 
 # Sources are provided via config.yaml under the `sources:` list.
 
@@ -114,6 +123,66 @@ print(f"[index] index_root: {INDEX_ROOT}")
 # -------------------------
 # Helpers
 # -------------------------
+def get_tokenizer() -> Optional[AutoTokenizer]:
+    """Lazily load tokenizer for token-cap enforcement."""
+    global TOKENIZER
+    if MAX_TOKENS_PER_CHUNK <= 0:
+        return None
+    if TOKENIZER is None:
+        with TOKENIZER_LOCK:
+            if TOKENIZER is None:
+                try:
+                    TOKENIZER = AutoTokenizer.from_pretrained(TOKENIZER_MODEL_ID, trust_remote_code=True)
+                except Exception:
+                    TOKENIZER = None
+    return TOKENIZER
+
+def trim_to_token_cap(text: str, cap: int) -> Tuple[str, bool]:
+    if cap <= 0:
+        return text, False
+    tok = get_tokenizer()
+    if tok is None:
+        return text, False
+    ids = tok.encode(text, add_special_tokens=False)
+    if len(ids) <= cap:
+        return text, False
+    trimmed_text = tok.decode(ids[:cap], skip_special_tokens=True)
+    return trimmed_text, True
+
+def sentence_split(text: str) -> List[str]:
+    """Best-effort sentence splitter with lightweight fallback."""
+    s = text.strip()
+    if not s:
+        return []
+    try:
+        from nltk.tokenize import sent_tokenize
+        out = [t.strip() for t in sent_tokenize(s) if t.strip()]
+        if out:
+            return out
+    except Exception:
+        pass
+    try:
+        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", s)
+        out = [p.strip() for p in parts if p.strip()]
+        if out:
+            return out
+    except Exception:
+        pass
+    return [s]
+
+def effective_chunk_params(entry: Dict) -> Dict[str, int]:
+    chunk_cfg = entry.get("chunking") if isinstance(entry.get("chunking"), dict) else {}
+    return {
+        "code_max_lines": int(chunk_cfg.get("code_max_lines") or CODE_MAX_LINES),
+        "overlap_lines": int(chunk_cfg.get("overlap_lines") or OVERLAP_LINES),
+        "prose_max_chars": int(chunk_cfg.get("prose_max_chars") or PROSE_MAX_CHARS),
+        "min_chunk_chars": int(chunk_cfg.get("min_chunk_chars") or MIN_CHUNK_CHARS),
+        "token_cap": int(chunk_cfg.get("tokenizer_cap") or MAX_TOKENS_PER_CHUNK),
+    }
+
+def dedup_key(text: str) -> str:
+    return " ".join(text.split())
+
 SKIP_BIN = {".png",".bmp",".gif",".jpg",".jpeg",".ogg",".wav",".mp3",".bin",".dat",".zip",".7z",".rar",".exe"}
 SKIP_ASM = {".s",".asm"}   # skip heavy assembly
 
@@ -159,6 +228,34 @@ def char_chunks(text: str, max_chars: int, min_chars: int):
             yield chunk
         i = j
 
+def prose_chunks(text: str, max_chars: int, min_chars: int) -> List[str]:
+    """Sentence-aware prose chunking with fallback to char windows."""
+    sentences = sentence_split(text)
+    if len(sentences) <= 1:
+        return list(char_chunks(text, max_chars, min_chars))
+
+    out: List[str] = []
+    buf: List[str] = []
+    buf_len = 0
+    for idx, sent in enumerate(sentences):
+        if not sent:
+            continue
+        add_len = len(sent) + (1 if buf else 0)
+        if buf and (buf_len + add_len) > max_chars:
+            chunk = " ".join(buf).strip()
+            if chunk and (len(chunk) >= min_chars or idx == len(sentences) - 1):
+                out.append(chunk)
+            buf = [sent]
+            buf_len = len(sent)
+        else:
+            buf.append(sent)
+            buf_len += add_len
+    if buf:
+        chunk = " ".join(buf).strip()
+        if chunk:
+            out.append(chunk)
+    return out
+
 def _match_any(p: Path, globs: List[str]) -> bool:
     if not globs:
         return True
@@ -188,6 +285,7 @@ def scan_sources() -> List[Dict]:
         include = src.get("include") or ["**/*"]
         exclude = src.get("exclude") or []
         treat_as = (src.get("treat_as") or "auto").lower()
+        chunking = src.get("chunking") if isinstance(src.get("chunking"), dict) else {}
         size_cap_mb = int(src.get("max_size_mb") or args.max_size_mb or 0)
 
         for p in root.rglob("*"):
@@ -211,6 +309,7 @@ def scan_sources() -> List[Dict]:
                 path=str(p),
                 url=str(p) if source_type != "repo" else None,
                 treat_as=treat_as,
+                chunking=chunking,
             ))
     return out
 
@@ -230,6 +329,11 @@ def chunk_file(entry: Dict) -> List[Dict]:
     except Exception:
         return []
     rows: List[Dict] = []
+    params = effective_chunk_params(entry)
+    token_cap = params["token_cap"]
+    trimmed_local = 0
+    dedup_local = 0
+    seen: Set[str] = set()
     ta = (entry.get("treat_as") or "auto").lower()
     if ta == "code":
         is_code = True
@@ -242,9 +346,17 @@ def chunk_file(entry: Dict) -> List[Dict]:
         else:
             is_code = (is_code_file(p) or ("inc" in p.parts or "include" in p.parts or "src" in p.parts or "sample" in p.parts))
     if is_code:
-        for (start, end, chunk) in line_chunks(txt, CODE_MAX_LINES, OVERLAP_LINES):
+        for (start, end, chunk) in line_chunks(txt, params["code_max_lines"], params["overlap_lines"]):
             if len(chunk.strip()) < 5: 
                 continue
+            chunk_text, trimmed = trim_to_token_cap(chunk, token_cap)
+            if trimmed:
+                trimmed_local += 1
+            key = dedup_key(chunk_text)
+            if key in seen:
+                dedup_local += 1
+                continue
+            seen.add(key)
             rows.append({
                 "id": hashlib.md5(f"{p}:{start}-{end}".encode()).hexdigest(),
                 "source_type": entry["source_type"],
@@ -253,22 +365,34 @@ def chunk_file(entry: Dict) -> List[Dict]:
                 "url": entry.get("url"),
                 "start_line": start,
                 "end_line": end,
-                "text": chunk
+                "text": chunk_text
             })
     else:
-        for chunk in char_chunks(txt, PROSE_MAX_CHARS, MIN_CHUNK_CHARS):
+        for chunk in prose_chunks(txt, params["prose_max_chars"], params["min_chunk_chars"]):
             if not chunk:
                 continue
+            chunk_text, trimmed = trim_to_token_cap(chunk, token_cap)
+            if trimmed:
+                trimmed_local += 1
+            key = dedup_key(chunk_text)
+            if key in seen:
+                dedup_local += 1
+                continue
+            seen.add(key)
             rows.append({
-                "id": hashlib.md5(f"{p}:{hash(chunk)}".encode()).hexdigest(),
+                "id": hashlib.md5(f"{p}:{hash(chunk_text)}".encode()).hexdigest(),
                 "source_type": entry["source_type"],
                 "repo": entry.get("repo"),
                 "path": str(p),
                 "url": entry.get("url"),
                 "start_line": None,
                 "end_line": None,
-                "text": chunk
+                "text": chunk_text
             })
+    if trimmed_local or dedup_local:
+        with STATS_LOCK:
+            CHUNK_STATS["trimmed"] += trimmed_local
+            CHUNK_STATS["deduped"] += dedup_local
     return rows
 
 # -------------------------
@@ -591,6 +715,10 @@ def main():
     if total > 0 and (len(combined_meta) > 0):
         rate = (embedded if embedded else len(combined_meta)) / total
         print(f"Throughput:      {rate:.2f} chunks/sec (~{rate*60:.0f} chunks/min)")
+    trimmed = CHUNK_STATS.get("trimmed", 0)
+    deduped = CHUNK_STATS.get("deduped", 0)
+    if trimmed or deduped:
+        print(f"Chunks trimmed by token cap: {trimmed}  • deduped (skipped): {deduped}")
     print("=================\n")
 
     print("Index built:", FAISS_PATH, "and", META_PATH)

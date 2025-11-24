@@ -23,16 +23,27 @@ sources:
     path: ./data/tutorials_txt
     include: ["**/*.md","**/*.html","**/*.txt"]
     treat_as: prose
+    chunking:
+      prose_max_chars: 1400
+      min_chunk_chars: 200
+      tokenizer_cap: 650
   - name: Docs
     type: docs
     path: ./data/docs_txt
     include: ["**/*.txt"]
     treat_as: prose
+    chunking:
+      prose_max_chars: 1200
+      min_chunk_chars: 250
+      tokenizer_cap: 650
   - name: ExternalDocs
     type: docs
     path: ./data/documents_txt
     include: ["**/*.txt"]
     treat_as: prose
+    chunking:
+      prose_max_chars: 1200
+      min_chunk_chars: 250
 
 # Alternatively, define a generic sources list (recommended):
 # sources:

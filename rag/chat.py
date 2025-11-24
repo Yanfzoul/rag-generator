@@ -87,6 +87,29 @@ TEMPLATE         = PROMPT_CFG.get("template",
     "SYSTEM:\n{system_message}\n\nQUESTION:\n{question}\n\nCONTEXT (CITED EXCERPTS):\n{context}\n\nANSWER:\n"
 )
 
+INDEXING_CFG = CFG.get("indexing", {}) or {}
+DEF_CODE_MAX_LINES   = int(INDEXING_CFG.get("code_max_lines", 100))
+DEF_PROSE_MAX_CHARS  = int(INDEXING_CFG.get("prose_max_chars", 1600))
+DEF_MIN_CHUNK_CHARS  = int(INDEXING_CFG.get("min_chunk_chars", 300))
+DEF_OVERLAP_LINES    = int(INDEXING_CFG.get("overlap_lines", 10))
+MAX_TOKENS_PER_CHUNK = int((CFG.get("max_tokens_per_chunk") or 0) or 0)
+TOKENIZER_MODEL_ID   = CFG.get("tokenizer_model_id") or GEN_MODEL_ID
+
+SOURCE_CFGS = []
+for _src in (CFG.get("sources") or []):
+    root = Path(_src.get("path", "")).resolve()
+    if not root.exists():
+        continue
+    SOURCE_CFGS.append({
+        "root": root,
+        "type": _src.get("type", "source"),
+        "name": _src.get("name") or _src.get("type", "source"),
+        "treat_as": (_src.get("treat_as") or "auto").lower(),
+        "chunking": _src.get("chunking") if isinstance(_src.get("chunking"), dict) else {},
+    })
+
+CHUNK_TOKENIZER = None
+
 # ------------------ Load models & data ------------------
 print(f"[chat] loading embedder: {EMB_MODEL_ID}")
 embedder = SentenceTransformer(EMB_MODEL_ID)
@@ -185,8 +208,76 @@ try:
 except Exception:
     pass
 
+def get_chunk_tokenizer():
+    """Lazily load tokenizer for token-cap enforcement on attachment chunks."""
+    global CHUNK_TOKENIZER
+    if MAX_TOKENS_PER_CHUNK <= 0:
+        return None
+    if CHUNK_TOKENIZER is not None:
+        return CHUNK_TOKENIZER
+    try:
+        CHUNK_TOKENIZER = AutoTokenizer.from_pretrained(TOKENIZER_MODEL_ID, trust_remote_code=True)
+    except Exception:
+        # fallback: reuse generator tokenizer if available
+        CHUNK_TOKENIZER = tok
+    return CHUNK_TOKENIZER
+
+def trim_to_token_cap(text: str, cap: int) -> tuple[str, bool]:
+    if cap <= 0:
+        return text, False
+    tok_local = get_chunk_tokenizer()
+    if tok_local is None:
+        return text, False
+    ids = tok_local.encode(text, add_special_tokens=False)
+    if len(ids) <= cap:
+        return text, False
+    trimmed_text = tok_local.decode(ids[:cap], skip_special_tokens=True)
+    return trimmed_text, True
+
+def sentence_split(text: str):
+    s = text.strip()
+    if not s:
+        return []
+    try:
+        from nltk.tokenize import sent_tokenize
+        out = [t.strip() for t in sent_tokenize(s) if t.strip()]
+        if out:
+            return out
+    except Exception:
+        pass
+    parts = re.split(r"(?<=[.!?])\\s+(?=[A-Z0-9])", s)
+    out = [p.strip() for p in parts if p.strip()]
+    return out or [s]
+
+def effective_chunk_params(src_cfg: dict | None):
+    chunk_cfg = (src_cfg.get("chunking") if src_cfg else {}) or {}
+    return dict(
+        code_max_lines=int(chunk_cfg.get("code_max_lines") or DEF_CODE_MAX_LINES),
+        overlap_lines=int(chunk_cfg.get("overlap_lines") or DEF_OVERLAP_LINES),
+        prose_max_chars=int(chunk_cfg.get("prose_max_chars") or DEF_PROSE_MAX_CHARS),
+        min_chunk_chars=int(chunk_cfg.get("min_chunk_chars") or DEF_MIN_CHUNK_CHARS),
+        token_cap=int(chunk_cfg.get("tokenizer_cap") or MAX_TOKENS_PER_CHUNK),
+    )
+
+def dedup_key(text: str) -> str:
+    return " ".join(text.split())
+
+def find_source_for_path(p: Path) -> dict | None:
+    pr = p.resolve()
+    best = None
+    for src in SOURCE_CFGS:
+        root = src["root"]
+        try:
+            pr.relative_to(root)
+            if best is None or len(str(root)) > len(str(best["root"])):
+                best = src
+        except Exception:
+            continue
+    return best
+
 # ------------------ Attachments (ephemeral) ------------------
 SKIP_BIN = {".png",".bmp",".gif",".jpg",".jpeg",".ogg",".wav",".mp3",".bin",".dat",".zip",".7z",".rar",".exe"}
+DOC_SUFFIXES = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".odt", ".ods", ".odp", ".rtf"}
 
 def _is_code_file(p: Path) -> bool:
     return p.suffix.lower() in {".h",".hpp",".c",".cpp",".cc",".py",".js",".ts",".go",".rs",".java",".cs",".swift",".kt",".m",".mm",".s",".asm"}
@@ -201,7 +292,7 @@ def _read_text(p: Path) -> str:
             except Exception:
                 soup = BeautifulSoup(html, 'html.parser')
             return soup.get_text("\n")
-        if suf in {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".odt", ".ods", ".odp", ".rtf"}:
+        if suf in DOC_SUFFIXES:
             try:
                 from unstructured.partition.auto import partition
                 elements = partition(filename=str(p))
@@ -211,6 +302,19 @@ def _read_text(p: Path) -> str:
         return p.read_text(encoding='utf-8', errors='ignore')
     except Exception:
         return ""
+
+def _resolve_treat_as(p: Path, src_cfg: dict | None) -> str:
+    ta = (src_cfg.get("treat_as") if src_cfg else "auto") or "auto"
+    if ta == "code":
+        return "code"
+    if ta == "prose":
+        return "prose"
+    suf = p.suffix.lower()
+    if suf in DOC_SUFFIXES:
+        return "prose"
+    if _is_code_file(p) or ("inc" in p.parts or "include" in p.parts or "src" in p.parts or "sample" in p.parts):
+        return "code"
+    return "prose"
 
 def _line_chunks(text: str, max_lines: int = 100, overlap: int = 10):
     lines = text.splitlines()
@@ -231,6 +335,31 @@ def _char_chunks(text: str, max_chars: int = 1600, min_chars: int = 300):
         if len(chunk) >= min_chars or j == n:
             yield chunk
         i = j
+
+def _prose_chunks(text: str, max_chars: int, min_chars: int):
+    sentences = sentence_split(text)
+    if len(sentences) <= 1:
+        yield from _char_chunks(text, max_chars, min_chars)
+        return
+    buf = []
+    buf_len = 0
+    for idx, sent in enumerate(sentences):
+        if not sent:
+            continue
+        add_len = len(sent) + (1 if buf else 0)
+        if buf and (buf_len + add_len) > max_chars:
+            chunk = " ".join(buf).strip()
+            if chunk and (len(chunk) >= min_chars or idx == len(sentences) - 1):
+                yield chunk
+            buf = [sent]
+            buf_len = len(sent)
+        else:
+            buf.append(sent)
+            buf_len += add_len
+    if buf:
+        chunk = " ".join(buf).strip()
+        if chunk:
+            yield chunk
 
 def iter_attach_files(paths: list[str]) -> list[Path]:
     out = []
@@ -257,10 +386,20 @@ def build_attachment_rows() -> list[dict]:
         txt = _read_text(p)
         if not txt.strip():
             continue
-        if _is_code_file(p):
-            for (start, end, chunk) in _line_chunks(txt):
+        src_cfg = find_source_for_path(p)
+        params = effective_chunk_params(src_cfg)
+        token_cap = params["token_cap"]
+        treat_as = _resolve_treat_as(p, src_cfg)
+        seen = set()
+        if treat_as == "code":
+            for (start, end, chunk) in _line_chunks(txt, params["code_max_lines"], params["overlap_lines"]):
                 if len(chunk.strip()) < 5:
                     continue
+                chunk_text, _trimmed = trim_to_token_cap(chunk, token_cap)
+                key = dedup_key(chunk_text)
+                if key in seen:
+                    continue
+                seen.add(key)
                 rows.append(dict(
                     id=f"att:{p}:{start}-{end}",
                     source_type="attached",
@@ -269,23 +408,28 @@ def build_attachment_rows() -> list[dict]:
                     url=None,
                     start_line=start,
                     end_line=end,
-                    text=chunk,
+                    text=chunk_text,
                 ))
                 if args.attach_limit_chunks and len(rows) >= args.attach_limit_chunks:
                     return rows
         else:
-            for chunk in _char_chunks(txt):
+            for chunk in _prose_chunks(txt, params["prose_max_chars"], params["min_chunk_chars"]):
                 if not chunk:
                     continue
+                chunk_text, _trimmed = trim_to_token_cap(chunk, token_cap)
+                key = dedup_key(chunk_text)
+                if key in seen:
+                    continue
+                seen.add(key)
                 rows.append(dict(
-                    id=f"att:{p}:{hash(chunk)}",
+                    id=f"att:{p}:{hash(chunk_text)}",
                     source_type="attached",
                     repo=None,
                     path=str(p),
                     url=None,
                     start_line=None,
                     end_line=None,
-                    text=chunk,
+                    text=chunk_text,
                 ))
                 if args.attach_limit_chunks and len(rows) >= args.attach_limit_chunks:
                     return rows
