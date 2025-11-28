@@ -33,3 +33,23 @@ Run on CPU by default while enabling CUDA or Apple MPS acceleration, and optiona
 ## Risks / open questions
 - GPU/driver mismatches can break acceleration; keep requirements files aligned with supported wheels.
 - External API usage depends on network access and quotas; provide fallbacks to local generation.
+
+## Non-functional targets and validation
+- Device performance: GPU/MPS embedding throughput should be >2x CPU on supported hardware; log device and batch size.
+- Latency: chat with reranker on CPU p95 <4s on moderate index; GPU/MPS improves to <2.5s where available.
+- Failure modes: unavailable device must fail fast; no silent fallback without a warning.
+
+## Error handling and logging
+- Device selection errors (CUDA init, MPS unsupported) emit clear messages and either fall back (with warning) or exit per flag.
+- OpenAI bridge: network/auth failures surfaced with status/code; no retries with other keys.
+- Log whether CPU/GPU/MPS was used for embedding/generation and whether fallback occurred.
+
+## Security/privacy/ops
+- API keys for OpenAI bridge come from env/CLI only; never written to disk. Recommend rotation and scoped keys.
+- No request logging of prompt text beyond optional debug; redact secrets from logs.
+- Document driver/torch wheel requirements per platform in requirements files; pin versions.
+
+## Eval checklist
+- Run chat/retrieve on CPU, then with `--gpu`/`--mps`; compare throughput and log device selection.
+- Simulate missing CUDA/MPS to confirm clear failure or warned fallback.
+- Use OpenAI bridge with and without valid key/base URL to validate auth error handling and local retrieval preservation.

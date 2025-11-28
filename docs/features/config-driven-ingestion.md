@@ -34,3 +34,23 @@ Add or modify corpora by editing YAML only, keeping ingestion rules (paths, glob
 ## Risks / open questions
 - Missing paths are silently skipped; operators should validate source availability before indexing.
 - Very large or noisy globs may slow scanning; keep patterns narrow for big repos.
+
+## Non-functional targets and validation
+- Scan budget: handle 100k files with defaults in <10 minutes on CPU; warn when over 1k skipped files or >5% filtered by size/glob.
+- Memory budget: chunking runs in bounded batches; no single batch should exceed available RAM (guarded by batch size/config).
+- Config validation: unknown fields or wrong types are fatal; include/exclude/treat_as must parse cleanly before execution.
+
+## Error handling and logging
+- Missing paths or unreadable files: log with path and reason, skip, and continue; emit summary counts.
+- Unsupported/binary files: logged once per type with a skip count to avoid log spam.
+- Validation errors: fail fast with field name and expected type; exit non-zero.
+
+## Security/privacy/ops
+- Encourage excludes for secrets/PII; defaults skip binaries and common secrets globs when provided.
+- Runs are local; no network calls. Ensure permissions restrict access to source roots.
+- Keep `RAG_CONFIG` under version control with reviews for new sources.
+
+## Eval checklist
+- Add a new source with include/exclude and `treat_as`; verify chunks/embeddings created and meta omits excluded files.
+- Run with `max_size_mb` set; confirm large files are skipped and logged.
+- Toggle between configs via `RAG_CONFIG` and confirm different source sets are applied without code changes.

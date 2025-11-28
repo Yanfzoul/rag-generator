@@ -37,3 +37,23 @@ Combine semantic embedding search with optional lexical BM25, identifier boosts,
 ## Risks / open questions
 - Rank_bm25 must be installed for lexical fusion; document dependency.
 - Reranker increases latency; use only when precision gains are needed.
+
+## Non-functional targets and validation
+- Latency budgets (CPU): hybrid without reranker <1.5s p95 on moderate index (~100k chunks); with reranker <3s p95 for `initial_k<=50`.
+- Quality targets: hit@k on a curated eval set improves or holds vs semantic-only; set a minimal bar (e.g., hit@5 >= baseline).
+- Resource usage: BM25 memory bounded by meta text size; reranker batch sizes sized to fit device memory.
+
+## Error handling and logging
+- Missing BM25 dependency disables BM25 with a warning; retrieval continues semantic-only.
+- Missing symbols gracefully skip identifier boosts with a warning.
+- Reranker download/initialization failures fall back to non-reranked results and log downgrade.
+- Logs include weights used, device selection, and whether reranker/BM25/symbols were active.
+
+## Security/privacy/ops
+- Retrieval runs local; no external calls unless reranker/embedding fetch models. Cache models locally; avoid embedding text in logs.
+- Ensure index/meta paths have proper permissions; no PII is logged.
+
+## Eval checklist
+- Run semantic-only vs hybrid vs hybrid+reranker on the eval set; compare hit@k and latency.
+- Toggle BM25 off (`--bm25 false`) and verify score path switches without error.
+- Remove symbols or reranker to confirm graceful degradation and logged warnings.

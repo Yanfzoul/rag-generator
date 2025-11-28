@@ -34,3 +34,24 @@ Reuse existing embeddings and metadata when rebuilding indexes, only re-embeddin
 ## Risks / open questions
 - Corrupted or mismatched prior artifacts trigger a full rebuild; operators should monitor logs.
 - Moving files between sources may appear as delete+add; acceptable for current scope.
+
+## Non-functional targets and validation
+- Reuse ratio: for runs with <5% file changes, at least 90% of prior embeddings reused; report counts.
+- Runtime: incremental run should be <25% of full rebuild time when changes <10%.
+- Disk headroom: ensure available disk >2x new embeddings size before writing; warn otherwise.
+
+## Error handling and logging
+- If prior artifacts are missing or mismatched, log cause and fall back to full rebuild with a warning.
+- Manifest/meta length mismatch is fatal with clear guidance to rebuild cleanly.
+- Per-file failures during re-embed are logged with path; run exits non-zero if any failures remain.
+- Summary logs: counts of new/changed/deleted/kept files and chunks.
+
+## Security/privacy/ops
+- Index artifacts inherit source access; ensure index directories have restricted permissions.
+- Avoid logging content; log paths and counts only.
+- Backup/retention of indexes is operator-controlled; document the location (`paths.index_root`).
+
+## Eval checklist
+- Run full build, then modify <5% of files and rerun `--incremental`; confirm reuse ratio and timing improvement.
+- Delete a file and confirm it disappears from meta/manifest and FAISS row counts drop accordingly.
+- Introduce a corrupt manifest to see fallback to full rebuild with a clear warning.

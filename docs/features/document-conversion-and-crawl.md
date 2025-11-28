@@ -34,3 +34,24 @@ Convert heterogeneous documents and crawled HTML into text that can be indexed, 
 ## Risks / open questions
 - System dependencies (Tesseract, Poppler) must be installed for OCR; document requirements for each platform.
 - Conversion quality varies by source; operators should review outputs for critical corpora.
+
+## Non-functional targets and validation
+- Throughput: convert 500 PDFs (~5MB each) in <20 minutes on CPU baseline; log per-file timing to spot outliers.
+- OCR quality: configurable thresholds must reduce empty/garbage pages; aim for <5% empty-page rate on sampled scanned sets.
+- Crawl politeness: enforce robots.txt and rate limits (<1 req/s by default); cap depth and page count per config.
+- Outputs: all converted files land in `_txt` under the configured `dst` with UTF-8 text; no binary blobs.
+
+## Error handling and logging
+- Per-file errors (missing deps, corrupt files) logged with path and reason; pipeline continues; summary counts emitted.
+- Dependency checks (Poppler/Tesseract) fail fast with install hints; exit non-zero if required tools missing.
+- Crawl/normalize failures log URL and HTTP status; skipped pages counted.
+
+## Security/privacy/ops
+- Respect robots and allow/deny lists; do not crawl authenticated areas unless explicitly configured.
+- No cookies/tokens stored; if provided, keep in env vars, not configs.
+- Avoid logging document contents; log paths/URLs only. For PII-sensitive corpora, enable stricter globs/excludes.
+
+## Eval checklist
+- Run crawl+normalize on a small seed set; verify HTML -> text output and obeyed allow/deny.
+- Convert a mixed batch (PDF, DOCX, image scans) with OCR on/off; inspect sample outputs and empty-page rate.
+- Induce a missing dependency to confirm clear failure; fix and rerun successfully.
