@@ -91,10 +91,10 @@ attachments (per question) --> on-the-fly chunk/embed --> merged with retrieve/c
 - Operations: `tools/doctor.py` reports environment readiness; failures exit non-zero with actionable messages. CPU-first defaults prevent surprise GPU usage; crawling obeys rate limits to avoid abuse.
 
 ## Delivery plan
-- M1: Config validation + doctor gating for ingest/build CLIs; Owner: Eng lead; Target: 2024-09-15.
-- M2: Ingest/convert/crawl pipelines stable with sample configs; Owner: Ops; Target: 2024-09-22.
-- M3: Hybrid retrieval/chat CLIs with reranker and attachment limits enforced; Owner: Eng; Target: 2024-09-29.
-- M4: Eval scenarios + default configs published; Owner: PM/QA; Target: 2024-10-06.
+- M1: Config validation + doctor gating for ingest/build CLIs; Owner: Eng lead; Target: 2025-11-01.
+- M2: Ingest/convert/crawl pipelines stable with sample configs; Owner: Ops; Target: 2025-11-02.
+- M3: Hybrid retrieval/chat CLIs with reranker and attachment limits enforced; Owner: Eng; Target: 2025-11-03.
+- M4: Eval scenarios + default configs published; Owner: PM/QA; Target: 2025-11-06.
 
 ## Risks and mitigations
 - Remote model dependency outage blocks generation; mitigate with local default model fallback and cached downloads; Owner: Eng.
