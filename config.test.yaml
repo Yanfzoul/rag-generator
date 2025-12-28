@@ -1,12 +1,15 @@
 # Test configuration for fast local runs
 
+# ----- PATHS -----
 paths:
   data_root: ./data
   index_root: ./store
 
+# ----- INDEX -----
 index:
   name: test
 
+# ----- SOURCES -----
 sources:
   - name: CodeRepo
     type: repo
@@ -37,13 +40,18 @@ sources:
       min_chunk_chars: 200
       tokenizer_cap: 650
 
+# ----- INDEXING -----
 indexing:
   code_max_lines: 80
   prose_max_chars: 1200
   min_chunk_chars: 200
   overlap_lines: 8
 
-# Smaller, fast embedder for tests
+# Tokenizer used for counting/trimming; safe default aligns with small code model
+tokenizer_model_id: "stabilityai/stable-code-instruct-3b"
+model_id: "stabilityai/stable-code-instruct-3b"
+
+# ----- EMBEDDING / RERANK -----
 embedding:
   model: "sentence-transformers/all-MiniLM-L6-v2"
   batch_size: 32
@@ -55,10 +63,20 @@ reranker:
   top_k: 8
   final_k: 3
 
+# ----- RETRIEVAL -----
 retrieval:
   initial_k: 16
   include_metadata: [repo, path, start_line, end_line, url, source_type]
+  bm25:
+    enabled: false
+  fusion_weights:
+    semantic: 0.55
+    lexical: 0.35
+    identifier: 0.10
+  symbol_prefixes: ["API_","CFG_"]
+  source_weights: { repo: 1.0, docs: 1.0, external: 0.95 }
 
+# ----- PROMPT / GENERATION -----
 prompt:
   max_input_tokens: 3200
   context_separator: "\n---\n"
@@ -79,9 +97,30 @@ prompt:
 generation:
   model_id: "stabilityai/stable-code-instruct-3b"
 
+# ----- SYMBOLS (optional, for identifier boosts) -----
 symbols:
   base_dirs: []
   header_globs: ["**/*.h", "**/*.hpp"]
+
+# ----- OPTIONAL: Fetch/Crawl tasks (enable for a full web-first build) -----
+fetch:
+  - type: github
+    repo: https://github.com/org/repo
+    dest: ./data/repo
+    depth: 1
+
+crawl:
+  - seeds:
+      - https://example.com/docs
+    allow_domains: ["example.com"]
+    depth: 1
+    per_domain_limit: 50
+    out_dir: ./data/crawl
+
+# Optional: Normalize and convert tasks to avoid CLI arguments
+normalize:
+  - src: ./data/crawl
+    dst: ./data/crawl_txt
 
 convert_docs:
   - src: ./data/docs
