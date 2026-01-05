@@ -29,6 +29,9 @@ saved_contexts/
 *.parquet
 *.npy
 
+# Codex workspace files
+.codex/
+
 # Logs and temporary outputs
 *.log
 *.tmp
