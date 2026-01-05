@@ -18,6 +18,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Codex workspace files
+.codex/
+
 # Generated artifacts and local data
 store/
 data/
